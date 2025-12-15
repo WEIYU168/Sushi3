@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>東坡行旅 - 貶謫路線互動地圖</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Serif+TC:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Noto Serif TC', serif;
+            background-color: #f0ebe5;
+        }
+        
+        .font-calligraphy {
+            font-family: 'Ma Shan Zheng', cursive;
+        }
+
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #8b5cf6;
+            border-radius: 3px;
+        }
+        
+        /* Quiz Animation */
+        @keyframes pop-in {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop-in {
+            animation: pop-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* Wheel Styles */
+        .wheel-container {
+            position: relative;
+            width: 250px;
+            height: 250px;
+            border-radius: 50%;
+            border: 8px solid #78350f; /* Wood color border */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            background: #fff;
+            overflow: hidden;
+            transition: transform 4s cubic-bezier(0.17, 0.67, 0.12, 0.99); /* Ease out quart */
+        }
+        
+        .wheel-segment {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .wheel-pointer {
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0; 
+            height: 0; 
+            border-left: 15px solid transparent;
+            border-right: 15px solid transparent;
+            border-top: 25px solid #dc2626; /* Red pointer */
+            z-index: 10;
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+        }
+
+        .wheel-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            background: #78350f;
+            border-radius: 50%;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: bold;
+            font-family: serif;
+            border: 2px solid #fcd34d;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // 音效工具函數
+        const playSound = (type) => {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContext) return;
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                const now = ctx.currentTime;
+
+                if (type === 'correct') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(523.25, now);
+                    osc.frequency.exponentialRampToValueAtTime(1046.5, now + 0.1);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+                    osc.start(now);
+                    osc.stop(now + 0.5);
+                } else if (type === 'wrong') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.linearRampToValueAtTime(100, now + 0.2);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.linearRampToValueAtTime(0.001, now + 0.3);
+                    osc.start(now);
+                    osc.stop(now + 0.3);
+                } else if (type === 'win') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(523.25, now);
+                    osc.frequency.setValueAtTime(659.25, now + 0.1);
+                    osc.frequency.setValueAtTime(783.99, now + 0.2);
+                    gain.gain.setValueAtTime(0.05, now);
+                    gain.gain.linearRampToValueAtTime(0.001, now + 0.6);
+                    osc.start(now);
+                    osc.stop(now + 0.6);
+                } else if (type === 'tick') {
+                    // 轉盤轉動聲 (短促的木魚聲)
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(800, now);
+                    gain.gain.setValueAtTime(0.05, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+                    osc.start(now);
+                    osc.stop(now + 0.05);
+                } else if (type === 'firework') {
+                    // 煙火爆炸聲 (低頻噪音模擬，這裡用低頻震盪模擬)
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(100, now);
+                    osc.frequency.exponentialRampToValueAtTime(10, now + 0.5);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+                    osc.start(now);
+                    osc.stop(now + 0.5);
+                }
+            } catch (e) {
+                // Ignore audio errors
+            }
+        };
+
+        // 煙火特效組件
+        const Fireworks = () => {
+            const canvasRef = useRef(null);
+
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                let particles = [];
+                let animationId;
+
+                const createParticle = (x, y, color) => {
+                    const particleCount = 30;
+                    // 播放煙火音效
+                    playSound('firework');
+                    
+                    for (let i = 0; i < particleCount; i++) {
+                        particles.push({
+                            x, y,
+                            color,
+                            radius: Math.random() * 3 + 1,
+                            velocity: {
+                                x: (Math.random() - 0.5) * 8,
+                                y: (Math.random() - 0.5) * 8
+                            },
+                            life: 100,
+                            alpha: 1
+                        });
+                    }
+                };
+
+                const animate = () => {
+                    animationId = requestAnimationFrame(animate);
+                    ctx.clearRect(0, 0, canvas.width, canvas.height); 
+
+                    particles.forEach((p, index) => {
+                        if (p.life > 0) {
+                            ctx.beginPath();
+                            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                            ctx.fillStyle = `rgba(${p.color}, ${p.alpha})`;
+                            ctx.fill();
+                            p.x += p.velocity.x;
+                            p.y += p.velocity.y;
+                            p.life--;
+                            p.alpha -= 0.01;
+                        } else {
+                            particles.splice(index, 1);
+                        }
+                    });
+
+                    if (Math.random() < 0.05) {
+                        const x = Math.random() * canvas.width;
+                        const y = Math.random() * canvas.height * 0.6;
+                        const colors = ['255, 99, 71', '60, 179, 113', '100, 149, 237', '255, 215, 0', '255, 105, 180'];
+                        const color = colors[Math.floor(Math.random() * colors.length)];
+                        createParticle(x, y, color);
+                    }
+                };
+
+                const resize = () => {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                };
+
+                window.addEventListener('resize', resize);
+                resize();
+                animate();
+
+                return () => {
+                    window.removeEventListener('resize', resize);
+                    cancelAnimationFrame(animationId);
+                };
+            }, []);
+
+            return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-[60] bg-black/40" />;
+        };
+
+        // 精緻版東坡形象 SVG
+        const SuDongpoIcon = () => (
+            <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-2xl filter">
+                <defs>
+                    <linearGradient id="skinGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#fde68a" />
+                        <stop offset="100%" stopColor="#fcd34d" />
+                    </linearGradient>
+                    <linearGradient id="robeGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#7c2d12" />
+                        <stop offset="100%" stopColor="#451a03" />
+                    </linearGradient>
+                </defs>
+                <path d="M25 95 Q50 55 75 95" fill="url(#robeGradient)" />
+                <path d="M25 95 L20 100 L80 100 L75 95" fill="#451a03" />
+                <path d="M40 85 Q50 95 60 85" fill="none" stroke="#fff" strokeWidth="2" />
+                <ellipse cx="50" cy="55" rx="20" ry="22" fill="url(#skinGradient)" />
+                <path d="M28 40 L25 20 L75 20 L72 40 Z" fill="#1e1b4b" />
+                <rect x="22" y="15" width="56" height="8" rx="2" fill="#312e81" />
+                <path d="M22 38 L78 38" stroke="#312e81" strokeWidth="3" strokeLinecap="round" />
+                <rect x="45" y="10" width="10" height="10" fill="#1e1b4b" />
+                <path d="M38 50 Q42 48 45 50" fill="none" stroke="#4b5563" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M55 50 Q58 48 62 50" fill="none" stroke="#4b5563" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M39 56 Q42 54 45 56" fill="none" stroke="#000" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M55 56 Q58 54 61 56" fill="none" stroke="#000" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M45 68 Q35 75 38 82" fill="none" stroke="#1f2937" strokeWidth="1" />
+                <path d="M55 68 Q65 75 62 82" fill="none" stroke="#1f2937" strokeWidth="1" />
+                <path d="M48 70 Q50 80 52 70" fill="none" stroke="#1f2937" strokeWidth="1" />
+                <path d="M47 65 Q50 67 53 65" fill="none" stroke="#78350f" strokeWidth="1" strokeLinecap="round" />
+                <path d="M65 85 L85 70 L90 80 Z" fill="#fcd34d" opacity="0.8" />
+                <line x1="65" y1="85" x2="85" y2="70" stroke="#b45309" strokeWidth="0.5" />
+            </svg>
+        );
+
+        // ScoreBoard
+        const ScoreBoard = ({ score }) => {
+            const maxScore = 20;
+            const lights = [...Array(maxScore)].map((_, i) => i);
+
+            return (
+                <div className="absolute right-4 bottom-16 md:bottom-24 z-20 flex flex-col items-center animate-pop-in">
+                    <div className="bg-[#fcfaf5] text-stone-600 text-[10px] px-1 py-1 rounded-t border-x border-t border-stone-300 font-bold tracking-widest whitespace-nowrap shadow-sm">
+                        文采值
+                    </div>
+                    <div className="bg-[#fcfaf5]/90 backdrop-blur p-1 pb-1.5 rounded-b shadow-lg border border-stone-300 flex flex-col-reverse gap-[2px]">
+                        {lights.map((i) => {
+                            const isActive = i < score;
+                            return (
+                                <div 
+                                    key={i}
+                                    className={`w-3 h-1 md:w-4 md:h-1.5 rounded-[1px] transition-all duration-300 border border-stone-300
+                                        ${isActive 
+                                            ? 'bg-pink-400 shadow-[0_0_5px_#f472b6] border-pink-500' 
+                                            : 'bg-stone-200 opacity-40'
+                                        }
+                                    `}
+                                />
+                            );
+                        })}
+                    </div>
+                    <div className="mt-2 bg-[#fcfaf5] text-pink-500 font-mono text-lg md:text-xl font-bold px-2 py-0.5 rounded border border-stone-300 shadow-inner">
+                        {String(score).padStart(2, '0')}
+                    </div>
+                </div>
+            );
+        };
+
+        // Lucky Wheel Component
+        const LuckyWheel = ({ onComplete, isActive }) => {
+            const [rotation, setRotation] = useState(0);
+            const [isSpinning, setIsSpinning] = useState(false);
+            const [result, setResult] = useState(null);
+
+            const prizes = [
+                { name: '牡蠣', color: '#e5e7eb', text: '#374151', score: 2, desc: '吃完牡蠣後用幽默的口吻叮囑兒子不要聲張，怕其他官員也跑來搶食，這顯示了他樂觀豁達的性格和對美食的熱愛。' },
+                { name: '螃蟹', color: '#fca5a5', text: '#991b1b', score: 1, desc: '海南島四面環海，肥美的螃蟹是贈別的好禮。' },
+                { name: '黎族釀酒', color: '#fcd34d', text: '#92400e', score: 1, desc: '「華夷兩樽合，醉笑一歡同。」東坡與黎族朋友共飲真一酒，不分漢夷，情感真摯。' },
+                { name: '檳榔', color: '#86efac', text: '#166534', score: -2, desc: '初嘗幾口後，不久即吐之，全身發熱冒汗不適，過了幾個時辰才好。' }
+            ];
+
+            const spinToPrize = () => {
+                if (isSpinning || result) return;
+                setIsSpinning(true);
+                const prizeIndex = Math.floor(Math.random() * 4);
+                const segmentAngle = 360 / 4;
+                const offset = segmentAngle / 2;
+                const rotateAngle = 360 - (prizeIndex * segmentAngle + offset);
+                const targetRotation = 1800 + rotateAngle; 
+                setRotation(targetRotation);
+                
+                // 轉動音效
+                let spinTime = 0;
+                const spinInterval = setInterval(() => {
+                    spinTime += 100;
+                    if (spinTime < 3800) { // 稍微比動畫時間短
+                        playSound('tick');
+                    } else {
+                        clearInterval(spinInterval);
+                    }
+                }, 150); // 每 150ms 響一次
+
+                setTimeout(() => {
+                    setIsSpinning(false);
+                    const selectedPrize = prizes[prizeIndex];
+                    setResult(selectedPrize);
+                    if (selectedPrize.score > 0) playSound('correct');
+                    else playSound('wrong');
+                    onComplete(selectedPrize.score);
+                }, 4000);
+            };
+
+            return (
+                <div className={`absolute top-16 left-4 md:left-8 z-40 animate-pop-in flex flex-col items-center gap-4 ${!isActive ? 'pointer-events-none' : ''}`}>
+                    <div className="relative">
+                        <div className="wheel-pointer"></div>
+                        <div className="wheel-container" style={{ transform: `rotate(${rotation}deg)` }}>
+                            <div style={{
+                                width: '100%', height: '100%', borderRadius: '50%',
+                                background: `conic-gradient(${prizes[0].color} 0deg 90deg, ${prizes[1].color} 90deg 180deg, ${prizes[2].color} 180deg 270deg, ${prizes[3].color} 270deg 360deg)`
+                            }}></div>
+                            {prizes.map((p, i) => (
+                                <div key={i} className="absolute top-0 left-0 w-full h-full flex justify-center pt-4 font-bold font-serif text-lg" style={{ transform: `rotate(${i * 90 + 45}deg)`, color: p.text, textShadow: '0 1px 0 rgba(255,255,255,0.5)' }}>{p.name}</div>
+                            ))}
+                        </div>
+                        <button onClick={spinToPrize} disabled={isSpinning || result} className={`wheel-center hover:scale-110 transition-transform cursor-pointer shadow-lg ${result ? 'bg-stone-500' : 'bg-red-700'}`}>{result ? '完' : '抽'}</button>
+                    </div>
+                    {result && (
+                        <div className="bg-white/95 backdrop-blur p-4 rounded-lg shadow-xl border-2 border-amber-500 w-72 animate-pop-in text-center">
+                            <div className="text-xl font-bold mb-2 text-stone-800 font-calligraphy">獲得：{result.name}</div>
+                            <p className="text-sm text-stone-600 leading-relaxed font-serif text-justify mb-3">{result.desc}</p>
+                            <div className={`font-bold text-sm py-1 rounded ${result.score > 0 ? 'text-green-600 bg-green-50' : 'text-red-500 bg-red-50'}`}>文采值 {result.score > 0 ? '+' : ''}{result.score} !</div>
+                        </div>
+                    )}
+                    {!result && (
+                        <div className="bg-stone-800/80 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg backdrop-blur">點擊中央按鈕抽取海南名產</div>
+                    )}
+                </div>
+            );
+        };
+
+        // Rock Paper Scissors Component
+        const RockPaperScissors = ({ onWin, onLose, isActive }) => {
+            const [gameState, setGameState] = useState('start'); 
+            const [playerChoice, setPlayerChoice] = useState(null);
+            const [computerChoice, setComputerChoice] = useState(null);
+
+            const choices = [
+                { id: 'rock', icon: '✊', beats: 'scissors' },
+                { id: 'paper', icon: '✋', beats: 'rock' },
+                { id: 'scissors', icon: '✌️', beats: 'paper' }
+            ];
+
+            const playGame = (choiceId) => {
+                setPlayerChoice(choiceId);
+                const randomChoice = choices[Math.floor(Math.random() * choices.length)];
+                setComputerChoice(randomChoice.id);
+
+                if (choiceId === randomChoice.id) {
+                    setGameState('draw');
+                } else if (choices.find(c => c.id === choiceId).beats === randomChoice.id) {
+                    setGameState('win');
+                    playSound('win');
+                    setTimeout(() => onWin(), 1500);
+                } else {
+                    setGameState('lose');
+                    playSound('wrong');
+                }
+            };
+
+            const resetRound = () => {
+                setGameState('start');
+                setPlayerChoice(null);
+                setComputerChoice(null);
+            };
+
+            if (!isActive) return null;
+
+            return (
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-stone-900/95 p-6 rounded-xl shadow-2xl border-4 border-red-800 w-80 text-center z-50 animate-pop-in">
+                    <h3 className="text-2xl text-red-500 font-calligraphy mb-4">⚠️ 路遇劫匪 ⚠️</h3>
+                    {gameState === 'start' && (
+                        <>
+                            <p className="text-stone-300 mb-6 font-serif">「此路是我開！想過此路，先贏過我手中的拳頭！」</p>
+                            <div className="flex justify-center gap-4">
+                                {choices.map(c => (
+                                    <button key={c.id} onClick={() => playGame(c.id)} className="text-4xl bg-stone-700 hover:bg-stone-600 p-3 rounded-lg transition-transform hover:scale-110 active:scale-95 border border-stone-500">{c.icon}</button>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                    {(gameState === 'win' || gameState === 'lose' || gameState === 'draw') && (
+                        <div className="animate-pop-in">
+                            <div className="flex justify-center items-center gap-8 text-5xl mb-6">
+                                <div className="text-center"><span className="block text-xs text-stone-400 mb-2">你</span>{choices.find(c => c.id === playerChoice)?.icon}</div>
+                                <div className="text-red-500 font-bold">VS</div>
+                                <div className="text-center"><span className="block text-xs text-stone-400 mb-2">劫匪</span>{choices.find(c => c.id === computerChoice)?.icon}</div>
+                            </div>
+                            {gameState === 'draw' && (<div><p className="text-amber-400 text-xl font-bold mb-4">平手！再來一次！</p><button onClick={resetRound} className="bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700">再戰</button></div>)}
+                            {gameState === 'win' && (<div><p className="text-green-400 text-xl font-bold mb-4">贏了！劫匪落荒而逃！</p><p className="text-stone-400 text-sm">文采值 +1 (壓驚)</p></div>)}
+                            {gameState === 'lose' && (<div><p className="text-red-500 text-xl font-bold mb-4">輸了！盤纏被搶光...</p><p className="text-stone-400 text-sm mb-4">大俠請重新來過</p><button onClick={onLose} className="bg-red-800 text-white px-6 py-2 rounded hover:bg-red-900 border border-red-600">重新開始</button></div>)}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // 地點與測驗數據
+        const LOCATIONS = [
+            { id: 'start', name: '起點', x: 90, y: 10, desc: '請上傳地圖並點擊「開始行旅」。蘇軾的一生，是詩意與苦難交織的旅程。', poem: '人生到處知何似，應似飛鴻踏雪泥。' },
+            { id: 'mizhou', name: '密州', x: 64, y: 13, year: '1075-1076年 (40-41歲)', desc: '任密州知州。在此地文風大變，作風豪放。同時也寫下感人至深的悼亡詞。', poem: '會挽雕弓如滿月，西北望，射天狼。', quizzes: [
+                { question: '「老夫聊發少年狂，左牽黃，右擎蒼...」在《江城子·密州出獵》中，蘇軾用「親射虎，看孫郎」的典故，展現了何種氣概？', options: ['感嘆年華老去，力不從心', '渴望建功立業，英武豪邁', '描寫田園狩獵的悠閒', '諷刺朝廷重文輕武'], answer: 1, explanation: '正確！詞中「會挽雕弓如滿月，西北望，射天狼」一句，將自己比作三國孫權，表達了渴望為國戍邊、抗擊敵人的豪情壯志。' },
+                { question: '「十年生死兩茫茫，不思量，自難忘。」這首名垂千古的悼亡詞，是蘇軾夢見誰之後所作？', options: ['弟弟蘇轍', '恩師歐陽修', '亡妻王弗', '侍妾朝雲'], answer: 2, explanation: '答對了。這首詞寫得字字血淚，「相顧無言，惟有淚千行」，表達了對結髮妻子王弗深沉的思念與哀傷。' }
+            ]},
+            { id: 'xuzhou', name: '徐州', x: 65, y: 22, year: '1077年 (42歲)', desc: '任徐州知州。黃河決口，蘇軾親率軍民築堤抗洪。', poem: '暮雲收盡溢清寒，銀漢無聲轉玉盤。', quizzes: [
+                { question: '蘇軾在徐州寫下《中秋月》：「暮雲收盡溢清寒，銀漢無聲轉玉盤。」請問「玉盤」在此處運用了什麼修辭，指代什麼？', options: ['誇飾法，指代盛食物的盤子', '借代法，指代滿月', '擬人法，指代美人', '譬喻法，指代湖面'], answer: 1, explanation: '沒錯。蘇軾以「玉盤」借代潔白圓滿的月亮。這首詩描寫了他與弟弟蘇轍久別重逢共度中秋的清景。' }
+            ]},
+            { id: 'huzhou', name: '湖州', x: 77, y: 35, year: '1079年 (44歲)', desc: '任湖州知州僅三個月，爆發著名的「烏臺詩案」。', poem: '眼見青山，身在牢籠。此去一別，不知何日歸。', quizzes: [
+                { question: '蘇軾在上書《湖州謝表》時，因那句「愚不適時，難以追陪新進」，被新黨指控為什麼罪名？', options: ['貪汙受賄', '文字訕謗朝政', '私通敵國', '怠忽職守'], answer: 1, explanation: '正確。這句話被解讀為諷刺新法和新進官員，成為「烏臺詩案」文字獄的導火線。' }
+            ]},
+            { id: 'bianjing', name: '汴京', x: 48, y: 17, year: '1079年', desc: '北宋京城（今開封）。蘇軾被關押於御史台監獄（烏臺），生死未卜。', poem: '聖主如天萬物春，小臣愚暗自亡身。', quizzes: [
+                { question: '蘇軾獄中絕筆詩：「與君世世為兄弟，更結來生未了因。」其中的「君」指的是誰？這句詩體現了什麼？', options: ['宋神宗；忠君愛國', '王安石；政治和解', '蘇轍；深厚手足情', '黃庭堅；文人相惜'], answer: 2, explanation: '是的。蘇軾以為必死無疑，最放不下的就是弟弟蘇轍，這兩句詩展現了中國文學史上最感人的兄弟情誼。' },
+                { question: '【思辨】蘇軾從「文壇領袖」淪為「階下囚」，這種巨大的落差，對一位創作者而言，往往會帶來什麼影響？', options: ['從此噤若寒蟬，不再創作', '風格轉向諂媚，尋求翻身', '生命體驗更深刻，作品更具穿透力', '放棄文學，轉而經商'], answer: 2, explanation: '【思辨解析】苦難往往是文學的養分。這次劫難雖然摧毀了他的政治前途，卻洗鍊了他的靈魂，為後來黃州時期的巔峰創作奠定了基礎。' }
+            ]},
+            { id: 'robbery_event', name: '突發：路遇劫匪', type: 'rps', x: 53, y: 28, year: '貶謫途中', desc: '貶謫黃州途中，路途凶險，竟遇山賊攔路！', poem: '此路是我開，留下買路財！' },
+            { id: 'huangzhou', name: '黃州', x: 58, y: 39, year: '1079-1084年 (44-49歲)', desc: '貶為黃州團練副使。此時期是文學巔峰，寫下《赤壁賦》、《定風波》等。', poem: '大江東去，浪淘盡，千古風流人物。', quizzes: [
+                { question: '詞句賞析：「莫聽穿林打葉聲，何妨吟嘯且徐行。」這首《定風波》傳達了蘇軾怎樣的人生態度？', options: ['面對風雨的驚慌失措', '歸隱山林的消極避世', '任憑風雨、處變不驚的曠達', '期待天氣放晴的焦慮'], answer: 2, explanation: '正確！「一蓑煙雨任平生」道盡了他面對政治風暴與人生逆境時，那種泰然自若、超然物外的豁達胸襟。' },
+                { question: '【思辨】《赤壁賦》中「逝者如斯，而未嘗往也」，蘇軾透過水與月的變與不變，解決了什麼內心矛盾？', options: ['個人渺小與宇宙永恆的對立', '貧窮與富貴的差距', '仕途升遷的快慢', '朋友聚散的無常'], answer: 0, explanation: '【思辨解析】他領悟到，若從變的角度看，天地萬物無時不變；從不變的角度看，物與我皆無盡。這種哲學思考讓他超越了個人的得失與短暫。' }
+            ]},
+            { id: 'special_event_1', name: '突發事件：蘇仙與佛印', type: 'special', x: 68, y: 40, year: '趣事軼聞', desc: '蘇軾與好友佛印禪師同遊。佛印將寫有東坡詩詞的扇子扔入水中，戲稱「水流東坡詩（屍）」。東坡看到岸邊狗在啃骨頭，反擊道：「狗啃河上（和尚）骨」。兩人相視大笑，展現文人雅趣。', poem: '狗啃河上（和尚）骨，水流東坡詩（屍）。', quizzes: [
+                { question: '佛印禪師將寫有蘇軾詩句的扇子丟進水裡，戲稱「水流東坡詩」，是利用了哪個字的諧音來調侃蘇軾？', options: ['師（老師）', '失（遺失）', '屍（屍體）', '施（布施）'], answer: 2, explanation: '正確。佛印利用「詩」與「屍」同音，開玩笑說蘇東坡像水上的浮屍，這是兩人之間無傷大雅的玩笑。' },
+                { question: '蘇軾不甘示弱，指著岸邊正在啃骨頭的狗，回應「狗啃河上骨」，這裡的「河上」是指代什麼？', options: ['河面上的東西', '和尚（指佛印）', '喝湯', '闔上'], answer: 1, explanation: '答對了！蘇軾機智地利用「河上」與「和尚」的諧音，反擊佛印像那根被狗啃的骨頭，展現了極佳的急智。' }
+            ]},
+            { id: 'hangzhou', name: '杭州', x: 77, y: 41, year: '1089年', desc: '舊地重遊，疏浚西湖。', poem: '欲把西湖比西子，淡妝濃抹總相宜。', quizzes: [
+                { question: '「欲把西湖比西子，淡妝濃抹總相宜。」蘇軾這句詩運用了絕妙的譬喻，請問「西子」是指？', options: ['西邊的女子', '美女西施', '西王母', '西湖的別稱'], answer: 1, explanation: '沒錯。蘇軾將西湖比作古代美女西施，形容西湖無論晴天（淡妝）或雨天（濃抹），都有其獨特的美感。' }
+            ]},
+            { id: 'huizhou', name: '惠州', x: 62, y: 71, year: '1094年 (59歲)', desc: '年近六十，再貶惠州。', poem: '日啖荔枝三百顆，不辭長作嶺南人。', quizzes: [
+                { question: '「日啖荔枝三百顆，不辭長作嶺南人。」這句詩表面寫愛吃荔枝，實則反映了蘇軾哪種心境？', options: ['貪圖口腹之慾', '隨遇而安，苦中作樂', '後悔來到嶺南', '樂不思蜀，忘記故鄉'], answer: 1, explanation: '正確。在當時嶺南是蠻荒瘴癘之地，蘇軾能說出「不辭長作嶺南人」，展現了他極強的適應力與樂觀精神。' },
+                { question: '【思辨】蘇軾曾引用柔奴的話：「此心安處是吾鄉」。這與下列哪句西方諺語有異曲同工之妙？', options: ['條條大路通羅馬', '家是心之所在 (Home is where the heart is)', '羅馬不是一天造成的', '時間就是金錢'], answer: 1, explanation: '【思辨解析】兩者都強調了「家」的定義不在於地理位置，而在於內心的歸屬感與安寧。' }
+            ]},
+            { id: 'danzhou', name: '儋州', x: 40, y: 84, year: '1097年 (62歲)', desc: '貶至海南島儋州。', poem: '九死南荒吾不恨，茲遊奇絕冠平生。', quizzes: [
+                { question: '「九死南荒吾不恨，茲遊奇絕冠平生。」蘇軾將這次流放視為「奇絕」的遊歷，這用了什麼寫作手法？', options: ['反諷', '自嘲與昇華', '寫實', '虛構'], answer: 1, explanation: '正確。這是一種高度的自我昇華。他沒有沉溺於「九死」的怨恨，反而將極致的苦難轉化為人生中獨一無二的「奇絕」體驗。' }
+            ]},
+            { id: 'special_event_2', name: '突發事件：海南餽贈', type: 'wheel', x: 48, y: 78, year: '1100年', desc: '蘇軾遇赦北歸，海南父老依依不捨，紛紛致贈當地名產。東坡感念道：「我本儋耳人，寄生西蜀州。」', poem: '我本儋耳人，寄生西蜀州。' },
+            { id: 'changzhou', name: '常州', x: 78, y: 32, year: '1101年 (66歲)', desc: '遇赦北歸，病逝於此。', poem: '問汝平生功業，黃州惠州儋州。', quizzes: [
+                { question: '【思辨】蘇軾將黃州、惠州、儋州的流放生涯視為平生功業，這反映了苦難對其文學創作有何意義？', options: ['阻礙了才華發揮', '累積了怨恨與憤世嫉俗', '淬鍊了靈魂，使作品更具厚度與生命力', '只是無奈的自我安慰'], answer: 2, explanation: '【思辨解析】蘇軾在最困頓的時期創作出最偉大的作品，這證明了苦難並非毀滅，而是靈魂的試金石，讓他的文學超越了政治得失，進入了永恆的生命境界。' },
+                { question: '【思辨】蘇軾最後總結一生：「也無風雨也無晴」。如果用一個現代詞彙來形容這種境界，你認為最貼切的是？', options: ['躺平', '厭世', '和解', '奮鬥'], answer: 2, explanation: '【思辨解析】這是一種與自我、與世界、與命運的徹底「和解」。不再對抗風雨，也不再執著晴天，達到了內心真正的自由。' }
+            ]}
+        ];
+
+        function QuizCard({ quiz, onAnswer, isActive, hasNext, onNext, isLastOfGame, onFinishGame }) {
+            const [selected, setSelected] = useState(null);
+            const [showResult, setShowResult] = useState(false);
+
+            useEffect(() => {
+                setSelected(null);
+                setShowResult(false);
+            }, [quiz]);
+
+            if (!quiz || !isActive) return null;
+
+            const handleSelect = (index) => {
+                if (showResult) return;
+                setSelected(index);
+                setShowResult(true);
+                if (index === quiz.answer) {
+                    playSound('correct');
+                    onAnswer(true);
+                } else {
+                    playSound('wrong');
+                    onAnswer(false);
+                }
+            };
+
+            return (
+                <div className="absolute top-16 left-4 md:left-8 w-64 md:w-80 bg-[#fffdf5]/95 backdrop-blur-sm border-2 border-stone-400 rounded-lg shadow-xl overflow-hidden z-40 animate-pop-in font-serif">
+                    <div className="bg-amber-100 px-4 py-2 border-b border-stone-300 flex justify-between items-center">
+                        <span className="font-bold text-stone-800 flex items-center gap-2">
+                            <span className="text-lg">🎓</span> 東坡小學堂
+                        </span>
+                        <span className="text-xs text-stone-500">詩詞賞析</span>
+                    </div>
+                    <div className="p-4">
+                        <p className="text-stone-800 font-medium mb-3 text-sm leading-relaxed text-justify">
+                            {quiz.question}
+                        </p>
+                        <div className="space-y-2">
+                            {quiz.options.map((option, idx) => {
+                                let btnClass = "w-full text-left px-3 py-2 text-sm rounded border transition-colors ";
+                                if (!showResult) {
+                                    btnClass += "border-stone-200 hover:bg-amber-50 cursor-pointer text-stone-700";
+                                } else {
+                                    if (idx === quiz.answer) {
+                                        btnClass += "bg-green-100 border-green-500 text-green-800 font-bold";
+                                    } else if (idx === selected && idx !== quiz.answer) {
+                                        btnClass += "bg-red-100 border-red-500 text-red-800";
+                                    } else {
+                                        btnClass += "opacity-50 border-stone-100";
+                                    }
+                                }
+
+                                return (
+                                    <button 
+                                        key={idx}
+                                        onClick={() => handleSelect(idx)}
+                                        disabled={showResult}
+                                        className={btnClass}
+                                    >
+                                        {['A', 'B', 'C', 'D'][idx]}. {option}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {showResult && (
+                            <div className="mt-3 space-y-2">
+                                <div className={`p-2 rounded text-xs leading-relaxed border ${selected === quiz.answer ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                                    <strong>{selected === quiz.answer ? '🎉 答對了！' : '💡 答案是：' + ['A','B','C','D'][quiz.answer]}</strong><br/>
+                                    {quiz.explanation}
+                                </div>
+                                
+                                {hasNext && (
+                                    <button 
+                                        onClick={onNext}
+                                        className="w-full py-2 bg-amber-600 text-white rounded font-bold hover:shadow-lg transition-all shadow flex items-center justify-center gap-1 mt-2"
+                                    >
+                                        下一題 ➜
+                                    </button>
+                                )}
+
+                                {isLastOfGame && (
+                                    <button 
+                                        onClick={onFinishGame}
+                                        className="w-full py-2 bg-gradient-to-r from-red-600 to-amber-600 text-white rounded font-bold hover:shadow-lg transition-all animate-pulse shadow flex items-center justify-center gap-1 mt-2"
+                                    >
+                                        ✨ 查看最終評價 ✨
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function App() {
+            // 預設載入 '貶謫路線.jpg'
+            const [bgImage, setBgImage] = useState('貶謫路線.jpg');
+            const [imageError, setImageError] = useState(false); // 處理圖片載入失敗
+            const [step, setStep] = useState(0); 
+            const [quizIndex, setQuizIndex] = useState(0);
+            const [score, setScore] = useState(3);
+            const [showFinalResult, setShowFinalResult] = useState(false); // 控制最終評價顯示
+            const fileInputRef = useRef(null);
+
+            const handleImageUpload = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        setBgImage(e.target.result);
+                        setImageError(false);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const nextStep = () => {
+                if (step < LOCATIONS.length - 1) {
+                    setStep(step + 1);
+                    setQuizIndex(0);
+                }
+            };
+
+            const prevStep = () => {
+                if (step > 1) {
+                    setStep(step - 1);
+                    setQuizIndex(0);
+                }
+            };
+
+            const resetGame = () => {
+                setStep(1);
+                setQuizIndex(0);
+                setScore(3);
+                setShowFinalResult(false);
+            };
+
+            const startGame = () => {
+                setStep(1);
+                setQuizIndex(0);
+                setScore(3);
+                setShowFinalResult(false);
+            };
+
+            const nextQuiz = () => {
+                setQuizIndex(prev => prev + 1);
+            };
+
+            const handleAnswer = (isCorrect) => {
+                if (isCorrect) {
+                    setScore(prev => Math.min(prev + 1, 20)); 
+                }
+            };
+            
+            const handleWheelComplete = (points) => {
+                setScore(prev => Math.max(0, Math.min(prev + points, 20)));
+            };
+
+            const handleRPSWin = () => {
+                setScore(prev => Math.min(prev + 1, 20));
+                nextStep();
+            };
+
+            const handleRPSLose = () => {
+                setStep(1); 
+                setQuizIndex(0);
+                setScore(3);
+            };
+
+            const handleFinishGame = () => {
+                setShowFinalResult(true);
+                playSound('win');
+            };
+
+            const getFriendshipLevel = (score) => {
+                if (score >= 20) return { level: "生死之交", poem: "竹杖芒鞋輕勝馬，誰怕？一蓑煙雨任平生。" };
+                if (score >= 17) return { level: "莫逆之交", poem: "人生到處知何似，應似飛鴻踏雪泥。" };
+                if (score >= 14) return { level: "金蘭之交", poem: "試問嶺南應不好，卻道：此心安處是吾鄉。" };
+                if (score >= 10) return { level: "推心置腹", poem: "九死南荒吾不恨，茲遊奇絕冠平生。" };
+                if (score >= 6) return { level: "泛泛之交", poem: "長恨此身非我有，何時忘卻營營。" };
+                return { level: "一面之交", poem: "人有悲歡離合，月有陰晴圓缺，此事古難全。" };
+            };
+
+            const currentLocation = LOCATIONS[step];
+            const currentQuiz = currentLocation.quizzes ? currentLocation.quizzes[quizIndex] : null;
+            const hasNextQuiz = currentLocation.quizzes && quizIndex < currentLocation.quizzes.length - 1;
+            const isLastOfGame = step === LOCATIONS.length - 1 && currentQuiz && (!hasNextQuiz);
+            const friendship = getFriendshipLevel(score);
+
+            return (
+                <div className="flex flex-col items-center min-h-screen p-2 md:p-6 bg-[#f0ebe5]">
+                    {showFinalResult && (
+                        <>
+                            <Fireworks />
+                            <div className="fixed bottom-10 w-full text-center z-[70] text-white font-calligraphy text-3xl drop-shadow-lg animate-pulse pointer-events-none">
+                                林威宇老師創作
+                            </div>
+                        </>
+                    )}
+                    
+                    <div className="text-center mb-4 z-10">
+                        <h1 className="text-3xl md:text-5xl font-calligraphy text-stone-800 mb-1 drop-shadow-sm">東坡行旅</h1>
+                        <p className="text-stone-600 font-serif text-sm md:text-base">一蓑煙雨任平生：蘇軾貶謫路線互動圖</p>
+                    </div>
+
+                    <div className="relative w-full max-w-5xl bg-stone-200 rounded-xl shadow-2xl overflow-hidden border-4 border-stone-300 flex flex-col" style={{aspectRatio: '16/9', minHeight: '500px'}}>
+                        
+                        {bgImage && !imageError ? (
+                            <div className="relative w-full h-full">
+                                <img 
+                                    src={bgImage} 
+                                    alt="地圖背景" 
+                                    className="w-full h-full object-contain pointer-events-none select-none bg-[#e8e0d5]" 
+                                    onError={() => setImageError(true)} // 圖片載入失敗時切換模式
+                                />
+                                
+                                {step > 0 && (
+                                    <>
+                                        <div 
+                                            className="absolute w-12 h-12 md:w-16 md:h-16 transition-all duration-1000 ease-in-out z-20 transform -translate-x-1/2 -translate-y-1/2 cursor-pointer hover:scale-110 drop-shadow-2xl"
+                                            style={{ left: `${currentLocation.x}%`, top: `${currentLocation.y}%` }}
+                                        >
+                                            <SuDongpoIcon />
+                                            <div className="absolute -bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 px-2 py-0.5 rounded text-xs font-bold whitespace-nowrap shadow-sm border border-stone-400 text-stone-800">
+                                                {currentLocation.name}
+                                            </div>
+                                        </div>
+                                        
+                                        <ScoreBoard score={score} />
+                                    </>
+                                )}
+
+                                {LOCATIONS.map((loc, index) => {
+                                    if (index === 0) return null;
+                                    const isActive = index === step;
+                                    const isPast = index < step;
+                                    const isSpecial = loc.type === 'special';
+                                    const isWheel = loc.type === 'wheel';
+                                    const isRPS = loc.type === 'rps';
+                                    
+                                    let markerClass = "";
+                                    if (isActive) {
+                                        markerClass = (isSpecial || isWheel || isRPS ? 'bg-purple-600 ring-purple-200' : 'bg-red-600 ring-red-200') + ' scale-150 ring-4 z-10';
+                                    } else if (isPast) {
+                                        markerClass = 'bg-stone-600 z-0';
+                                    } else {
+                                        markerClass = (isSpecial || isWheel || isRPS ? 'bg-purple-400 border-purple-400' : 'bg-transparent border-stone-400') + ' border opacity-50';
+                                    }
+
+                                    return (
+                                        <div 
+                                            key={loc.id}
+                                            className={`absolute w-3 h-3 rounded-full transform -translate-x-1/2 -translate-y-1/2 transition-colors duration-500 ${markerClass}`}
+                                            style={{ left: `${loc.x}%`, top: `${loc.y}%` }}
+                                        />
+                                    );
+                                })}
+
+                                {step > 0 && currentQuiz && !currentLocation.type && (
+                                    <QuizCard 
+                                        key={currentLocation.id + quizIndex}
+                                        quiz={currentQuiz} 
+                                        isActive={!showFinalResult}
+                                        onAnswer={handleAnswer}
+                                        hasNext={hasNextQuiz} 
+                                        onNext={nextQuiz}
+                                        isLastOfGame={isLastOfGame} 
+                                        onFinishGame={handleFinishGame} 
+                                    />
+                                )}
+                                
+                                {step > 0 && currentLocation.type === 'special' && currentQuiz && (
+                                    <QuizCard 
+                                        key={currentLocation.id + quizIndex}
+                                        quiz={currentQuiz} 
+                                        isActive={true}
+                                        onAnswer={handleAnswer}
+                                        hasNext={hasNextQuiz}
+                                        onNext={nextQuiz}
+                                    />
+                                )}
+                                
+                                {step > 0 && currentLocation.type === 'wheel' && (
+                                    <LuckyWheel 
+                                        isActive={true}
+                                        onComplete={handleWheelComplete}
+                                    />
+                                )}
+
+                                {step > 0 && currentLocation.type === 'rps' && (
+                                    <RockPaperScissors
+                                        isActive={true}
+                                        onWin={handleRPSWin}
+                                        onLose={handleRPSLose}
+                                    />
+                                )}
+
+                                {/* Friendship Result Card */}
+                                {showFinalResult && (
+                                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white/95 backdrop-blur-md p-8 rounded-xl shadow-2xl border-4 border-amber-500 z-[80] animate-pop-in text-center w-80 md:w-96">
+                                        <h2 className="text-2xl font-bold text-stone-800 mb-2 font-calligraphy">旅程圓滿結束</h2>
+                                        <div className="text-4xl my-4">🎉</div>
+                                        <p className="text-stone-600 mb-4">您與東坡先生的文采共鳴度：</p>
+                                        <div className="text-5xl font-bold text-red-600 mb-2 font-calligraphy drop-shadow-md animate-bounce">
+                                            {friendship.level}
+                                        </div>
+                                        <p className="text-stone-500 text-sm mb-4">最終文采值：{score}</p>
+                                        
+                                        {/* 詩詞批註 */}
+                                        <div className="bg-stone-100 p-3 rounded mb-6 border border-stone-200">
+                                            <p className="font-calligraphy text-stone-700 text-lg">「{friendship.poem}」</p>
+                                        </div>
+
+                                        <button 
+                                            onClick={resetGame}
+                                            className="bg-stone-800 text-amber-50 px-6 py-3 rounded-full font-bold hover:bg-stone-700 transition-colors shadow-lg w-full text-lg border-2 border-amber-500/30"
+                                        >
+                                            重新遊歷
+                                        </button>
+                                    </div>
+                                )}
+
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-full w-full bg-[url('https://www.transparenttextures.com/patterns/aged-paper.png')]">
+                                <div className="text-6xl mb-4 opacity-20">🗺️</div>
+                                <h3 className="text-2xl font-bold text-stone-700 mb-4">請上傳地圖開始旅程</h3>
+                                <p className="text-stone-500 mb-8 max-w-md text-center">找不到預設地圖，請手動上傳。</p>
+                                <button 
+                                    onClick={() => fileInputRef.current.click()}
+                                    className="px-6 py-3 bg-stone-700 text-amber-50 rounded-lg shadow-lg hover:bg-stone-800 transition-colors font-bold flex items-center gap-2"
+                                >
+                                    上傳地圖圖片
+                                </button>
+                            </div>
+                        )}
+                        
+                        <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
+
+                        <div className="absolute bottom-4 right-4 flex gap-2 z-30">
+                            {step > 1 && currentLocation.type !== 'rps' && !showFinalResult && (
+                                <button onClick={prevStep} className="px-4 py-2 bg-white/90 backdrop-blur text-stone-700 rounded-lg shadow-md hover:bg-white border border-stone-300 font-serif text-sm md:text-base">
+                                    上一站
+                                </button>
+                            )}
+                            {bgImage && step < LOCATIONS.length - 1 && currentLocation.type !== 'rps' && (
+                                <button onClick={step === 0 ? startGame : nextStep} className="px-5 py-2 bg-red-800 text-white rounded-lg shadow-md hover:bg-red-900 font-bold tracking-widest font-serif ring-2 ring-red-200 text-sm md:text-base">
+                                    {step === 0 ? '開始行旅' : '下一站'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {step > 0 && (
+                        <div className="w-full max-w-5xl mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in-up">
+                            <div className={`md:col-span-1 bg-white p-5 rounded-lg shadow-md border-l-4 ${currentLocation.type === 'special' || currentLocation.type === 'wheel' || currentLocation.type === 'rps' ? 'border-purple-600' : 'border-red-800'} relative overflow-hidden`}>
+                                <div className="absolute top-0 right-0 -mt-2 -mr-2 text-8xl text-stone-100 font-calligraphy select-none z-0">
+                                    {currentLocation.name[0]}
+                                </div>
+                                <div className="relative z-10">
+                                    <div className="flex items-baseline gap-2 mb-2">
+                                        <h2 className="text-2xl font-bold text-stone-800 font-calligraphy">{currentLocation.name}</h2>
+                                        <span className={`text-xs font-bold ${currentLocation.type === 'special' || currentLocation.type === 'wheel' || currentLocation.type === 'rps' ? 'text-purple-700 bg-purple-50' : 'text-red-700 bg-red-50'} px-2 py-0.5 rounded-full`}>{currentLocation.year}</span>
+                                    </div>
+                                    <p className="text-stone-700 text-sm leading-relaxed text-justify">
+                                        {currentLocation.desc}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="md:col-span-2 bg-stone-800 text-stone-200 p-6 rounded-lg shadow-md relative overflow-hidden">
+                                <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/black-paper.png')]"></div>
+                                <div className="relative z-10 flex flex-col h-full justify-center items-center text-center">
+                                    <div className="mb-2 text-amber-500 text-xs tracking-[0.2em] uppercase border-b border-amber-500/30 pb-1">
+                                        {currentLocation.type === 'special' || currentLocation.type === 'wheel' || currentLocation.type === 'rps' ? '軼聞趣事' : '東坡詩詞選'}
+                                    </div>
+                                    <blockquote className="text-xl md:text-2xl font-calligraphy leading-loose text-white drop-shadow-md px-4">
+                                        「{currentLocation.poem}」
+                                    </blockquote>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
