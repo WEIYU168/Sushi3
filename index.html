@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>東坡行旅 - 貶謫路線互動地圖</title>
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Serif+TC:wght@400;700&display=swap');
@@ -47,6 +47,10 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo } = React;
+        
+        // 页面加载提示
+        console.log('=== 東坡行旅游戏已加载 ===');
+        console.log('提示：如需使用背景音乐和个性化地图，请确保文件与index.html在同一目录');
 
         // 音效工具函數
         let globalAudioCtx = null;
@@ -715,6 +719,12 @@
                     bgmRef.current.play().catch(e => console.log("Audio play blocked:", e));
                 }
                 setIntroState('playing');
+                // 如果视频加载失败，5秒后自动进入
+                setTimeout(() => {
+                    if (introState === 'playing') {
+                        endIntro();
+                    }
+                }, 5000);
             };
 
             const endIntro = () => {
@@ -856,21 +866,27 @@
             return (
                 <div className="flex flex-col items-center min-h-screen py-2 px-2 md:py-4 md:px-6 bg-[#f0ebe5]">
                     
-                    <audio ref={bgmRef} src="背景音樂.mp3" loop />
+                    <audio ref={bgmRef} src="背景音樂.mp3" loop onError={() => console.log("背景音樂加載失敗")} />
 
                     {introState !== 'finished' && (
-                        <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center">
+                        <div className="fixed inset-0 z-[100] bg-gradient-to-b from-slate-900 via-red-900 to-amber-900 flex flex-col items-center justify-center">
                             <video 
                                 ref={videoRef}
                                 src="東坡開場.mp4" 
                                 playsInline
                                 muted 
-                                onEnded={endIntro} 
-                                className="w-full h-full object-contain"
+                                onEnded={endIntro}
+                                onError={() => setTimeout(endIntro, 3000)}
+                                className="w-full h-full object-contain absolute inset-0"
                             />
                             
+                            <div className="absolute inset-0 bg-gradient-to-b from-slate-900/40 via-transparent to-red-900/40 flex flex-col items-start justify-start z-10 p-6 md:p-12">
+                                <h1 className="text-4xl md:text-6xl font-calligraphy text-amber-100 drop-shadow-2xl mb-2 text-left">東坡行旅</h1>
+                                <p className="text-lg md:text-xl text-amber-50/90 font-serif drop-shadow-lg text-left">一蓑煙雨任平生</p>
+                            </div>
+                            
                             {introState === 'waiting' && (
-                                <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-[102] backdrop-blur-sm">
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-[102] backdrop-blur-sm">
                                     <button 
                                         onClick={startIntro}
                                         className="bg-red-800 hover:bg-red-700 text-amber-50 px-8 py-4 rounded-full font-serif font-bold text-3xl shadow-[0_0_30px_rgba(153,27,27,0.6)] transition-all transform hover:scale-110 border-2 border-red-500"
@@ -1004,14 +1020,18 @@
                                 {step > 0 && (
                                     <>
                                         <div 
-                                            className="absolute w-16 h-16 md:w-28 md:h-28 transition-all duration-1000 ease-in-out z-20 transform -translate-x-1/2 -translate-y-1/2 cursor-pointer hover:scale-110 drop-shadow-2xl"
+                                            className="absolute w-16 h-16 md:w-28 md:h-28 transition-all duration-1000 ease-in-out z-20 transform -translate-x-1/2 -translate-y-1/2 cursor-pointer hover:scale-110 drop-shadow-2xl flex items-center justify-center"
                                             style={{ left: `${currentLocation.x}%`, top: `${currentLocation.y}%` }}
                                         >
                                             <img 
                                                 src="東坡小圖.png" 
                                                 alt="東坡" 
                                                 className="w-full h-full object-contain filter drop-shadow-md" 
-                                                onError={(e) => e.target.style.display = 'none'}
+                                                onError={(e) => {
+                                                    e.target.style.display = 'none';
+                                                    // 显示备用文字
+                                                    e.target.parentElement.innerHTML = '<div class="text-3xl md:text-5xl">📜</div>';
+                                                }}
                                             />
                                             <div className="absolute -bottom-6 md:-bottom-8 left-1/2 transform -translate-x-1/2 bg-white/90 px-2 py-0.5 md:py-1 rounded text-xs md:text-sm font-bold whitespace-nowrap shadow-sm border border-stone-400 text-stone-800">
                                                 {currentLocation.name}
@@ -1099,7 +1119,7 @@
                                                 上一站
                                             </button>
                                         )}
-                                        {bgImage && step < LOCATIONS.length - 1 && currentLocation.type !== 'rps' && (
+                                        {step < LOCATIONS.length - 1 && currentLocation.type !== 'rps' && (
                                             <button 
                                                 onClick={step === 0 ? startGame : nextStep} 
                                                 disabled={step > 0 && !canNext}
@@ -1117,14 +1137,14 @@
                             </div>
                         ) : (
                             <div className="flex flex-col items-center justify-center h-full w-full bg-[url('https://www.transparenttextures.com/patterns/aged-paper.png')]">
-                                <div className="text-6xl mb-4 opacity-20">🗺️</div>
-                                <h3 className="text-2xl md:text-3xl font-bold text-stone-700 mb-4">請上傳地圖開始旅程</h3>
-                                <p className="text-stone-500 mb-8 max-w-md text-center text-base">找不到預設地圖，請手動上傳。</p>
+                                <div className="text-6xl mb-4 opacity-40">🗺️</div>
+                                <h3 className="text-2xl md:text-3xl font-bold text-stone-700 mb-4">歡迎蒞臨</h3>
+                                <p className="text-stone-600 mb-8 max-w-md text-center text-base leading-relaxed">上傳高清地圖圖片以獲得更佳體驗（可選）</p>
                                 <button 
                                     onClick={() => fileInputRef.current.click()}
                                     className="px-6 py-3 bg-stone-700 text-amber-50 rounded-lg shadow-lg hover:bg-stone-800 transition-colors font-bold flex items-center gap-2 text-lg"
                                 >
-                                    上傳地圖圖片
+                                    📤 上傳地圖圖片
                                 </button>
                             </div>
                         )}
